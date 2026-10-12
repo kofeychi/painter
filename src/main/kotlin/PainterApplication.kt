@@ -5,6 +5,8 @@ import com.google.gson.GsonBuilder
 import it.unimi.dsi.fastutil.objects.ObjectArrayList
 import org.joml.Vector2i
 import java.awt.*
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.awt.geom.Rectangle2D
 import java.io.File
 import java.nio.file.Files
@@ -64,6 +66,11 @@ class PainterApplication {
 
     private fun buildControls() {
         controls.defaultCloseOperation = WindowConstants.DO_NOTHING_ON_CLOSE
+        controls.addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(event: WindowEvent) {
+                shutdown()
+            }
+        })
         controls.isAlwaysOnTop = true
         controls.minimumSize = Dimension(360, 520)
         controls.setSize(400, 650)
