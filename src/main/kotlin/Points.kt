@@ -11,6 +11,7 @@ class Points {
     var draggedCornerIndex: Int = -1
     var HANDLE_SIZE: Int = 12
     var onSet: (Int, ColoredPoint) -> Unit = { _, _ -> }
+    var onRelease: () -> Unit = {}
 
     fun mmousePressed(e: MouseEvent) {
         for ((key, coloredPoint) in points) {
@@ -50,6 +51,7 @@ class Points {
 
         override fun mouseReleased(e: MouseEvent?) {
             e?.let { mmouseReleased(it) }
+            onRelease()
         }
 
         override fun mouseDragged(e: MouseEvent?) {

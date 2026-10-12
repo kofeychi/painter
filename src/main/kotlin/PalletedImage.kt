@@ -1,8 +1,9 @@
-import it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap
 import it.unimi.dsi.fastutil.objects.ObjectArrayList
 import org.joml.Vector2i
 import java.awt.image.BufferedImage
 import java.util.Comparator
+import java.util.HashSet
+import java.util.LinkedHashMap
 
 data class ARGBColor(
     val color: Int
@@ -77,40 +78,35 @@ data class ARGBColor(
 data class ExtractionResult(val colors: ObjectArrayList<ARGBColor>)
 
 data class PalletedImage(
-    val pallete: Object2ObjectArrayMap<ARGBColor, ObjectArrayList<Vector2i>>,
+    val pallete: MutableMap<ARGBColor, ObjectArrayList<Vector2i>>,
     val size: Vector2i
 ) {
     companion object {
         fun extractPallete(image: BufferedImage): ExtractionResult {
             val out = ExtractionResult(ObjectArrayList())
+            val known = HashSet<ARGBColor>()
             for (y in 0 until image.height) {
                 for (x in 0 until image.width) {
-                    val c = ARGBColor.ofTransparent(image.getRGB(x, y))
-                    if (c.alpha < 128) continue
-                    if (!out.colors.contains(c)) {
-                        out.colors.add(c)
-                    }
+                    val color = ARGBColor.ofTransparent(image.getRGB(x, y))
+                    if (color.alpha < 128) continue
+                    if (known.add(color)) out.colors.add(color)
                 }
             }
             return out
         }
 
         fun extractPalletedImage(image: BufferedImage): PalletedImage {
-            val out = PalletedImage(Object2ObjectArrayMap(), Vector2i(image.width, image.height))
-            val pallete: ExtractionResult = extractPallete(image)
-
-            for (c in pallete.colors) {
-                out.pallete.put(c, ObjectArrayList())
-            }
-
+            // JPEGs often contain tens of thousands of distinct colors. Build with a hash map
+            // to avoid quadratic lookups while extracting and keep color traversal deterministic.
+            val coordsByColor = LinkedHashMap<ARGBColor, ObjectArrayList<Vector2i>>()
             for (y in 0 until image.height) {
                 for (x in 0 until image.width) {
-                    val c = ARGBColor.ofTransparent(image.getRGB(x, y))
-                    if (c.alpha < 128) continue // Ignore transparent background pixels
-                    out.pallete[c]?.add(Vector2i(x, y))
+                    val color = ARGBColor.ofTransparent(image.getRGB(x, y))
+                    if (color.alpha < 128) continue
+                    coordsByColor.computeIfAbsent(color) { ObjectArrayList() }.add(Vector2i(x, y))
                 }
             }
-            return out
+            return PalletedImage(coordsByColor, Vector2i(image.width, image.height))
         }
     }
 
@@ -286,7 +282,7 @@ data class PalletedImage(
             if (!changed) break
         }
 
-        val newPallete = Object2ObjectArrayMap<ARGBColor, ObjectArrayList<Vector2i>>()
+        val newPallete = LinkedHashMap<ARGBColor, ObjectArrayList<Vector2i>>()
 
         for (cluster in clusters) {
             val c = cluster.color
@@ -333,7 +329,7 @@ data class PalletedImage(
         val gridHeight = (size.y + regionHeight - 1) / regionHeight
 
         val tilePalettes = Array(gridWidth * gridHeight) {
-            Object2ObjectArrayMap<ARGBColor, ObjectArrayList<Vector2i>>()
+            LinkedHashMap<ARGBColor, ObjectArrayList<Vector2i>>()
         }
 
         for ((color, coords) in pallete) {

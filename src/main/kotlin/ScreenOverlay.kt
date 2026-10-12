@@ -12,6 +12,11 @@ class ScreenOverlay {
     val frame: JFrame = JFrame("ScreenOverlay")
     val drawPanel: DrawPanel = DrawPanel()
 
+    var clickThroughEnabled: Boolean = false
+        private set
+    var clickThroughError: String? = null
+        private set
+
     init {
         frame.isUndecorated = true
         frame.background = Color(0, 0, 0, 0)
@@ -28,7 +33,45 @@ class ScreenOverlay {
         get() = frame.isVisible
         set(value) {
             frame.isVisible = value
+            // Some desktop window managers drop an overlay from the topmost group
+            // when it is hidden and shown again. Re-assert the topmost flag after
+            // showing it rather than relying only on the constructor setting.
+            if (value) {
+                frame.isAlwaysOnTop = true
+                // Re-apply native input styles after a hidden/shown cycle; some
+                // window managers can recreate or reset the native window state.
+                if (clickThroughEnabled && WindowsWindowInput.isSupported()) {
+                    try {
+                        WindowsWindowInput.setClickThrough(frame, true)
+                    } catch (exception: Exception) {
+                        clickThroughError = exception.message ?: exception.javaClass.simpleName
+                    }
+                }
+            }
         }
+
+    fun showOnTop() {
+        frame.isAlwaysOnTop = true
+        frame.isVisible = true
+        frame.isAlwaysOnTop = true
+    }
+
+    /** Enable or disable mouse pass-through for the full-screen preview window. */
+    fun setClickThrough(enabled: Boolean): Boolean {
+        if (!WindowsWindowInput.isSupported()) {
+            clickThroughError = "Click-through is currently supported on Windows only."
+            return false
+        }
+        return try {
+            WindowsWindowInput.setClickThrough(frame, enabled)
+            clickThroughEnabled = enabled
+            clickThroughError = null
+            true
+        } catch (exception: Exception) {
+            clickThroughError = exception.message ?: exception.javaClass.simpleName
+            false
+        }
+    }
 
     fun addShape(shape: Shape, color: Color, thickness: Float) {
         drawPanel.addDrawingItem(DrawingItem(shape, color, thickness))

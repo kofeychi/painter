@@ -6,6 +6,7 @@ import org.joml.Vector3f
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.geom.Area
 import java.awt.geom.Ellipse2D
 import java.awt.geom.Path2D
 import java.awt.geom.Rectangle2D
@@ -17,7 +18,12 @@ class TransformableGrid(rectangle: Rectangle2D) {
     companion object {
         const val CENTER_HANDLE_INDEX = 4
         const val RESIZE_HANDLE_START = 5
+        const val X_LEFT_HANDLE_INDEX = 9
+        const val X_RIGHT_HANDLE_INDEX = 10
+        const val Y_TOP_HANDLE_INDEX = 11
+        const val Y_BOTTOM_HANDLE_INDEX = 12
         const val RESIZE_OFFSET = 44.0
+        const val EDGE_HANDLE_OFFSET = 28.0
     }
     var HANDLE_SIZE: Int = 12
     val corners: Array<Point>
@@ -26,6 +32,9 @@ class TransformableGrid(rectangle: Rectangle2D) {
     var showGridLines: Boolean = true
     private var lastMousePos: Point? = null
     private var initialCorners: Array<Point>? = null
+    private var lastPressWasHandle: Boolean = false
+    var onCellClicked: ((Vector2i) -> Unit)? = null
+    var onTransformChanged: (() -> Unit)? = null
     val cached: Object2ObjectOpenHashMap<Vector2i, Vector2f> = Object2ObjectOpenHashMap()
 
     init {
@@ -68,13 +77,38 @@ class TransformableGrid(rectangle: Rectangle2D) {
         )
     }
 
+    /** X handles sit just outside the left and right edges. */
+    fun getLeftXScaleHandlePoint(): Point = outwardEdgeHandle(corners[0], corners[3])
+
+    fun getRightXScaleHandlePoint(): Point = outwardEdgeHandle(corners[1], corners[2])
+
+    /** Y handles sit just outside the top and bottom edges. */
+    fun getTopYScaleHandlePoint(): Point = outwardEdgeHandle(corners[0], corners[1])
+
+    fun getBottomYScaleHandlePoint(): Point = outwardEdgeHandle(corners[3], corners[2])
+
+    private fun outwardEdgeHandle(first: Point, second: Point): Point {
+        val midX = (first.x + second.x) / 2.0
+        val midY = (first.y + second.y) / 2.0
+        val center = centerPoint
+        var dx = midX - center.x
+        var dy = midY - center.y
+        val length = Math.hypot(dx, dy)
+        if (length < 0.0001) return Point(midX.toInt(), midY.toInt())
+        dx /= length
+        dy /= length
+        return Point((midX + dx * EDGE_HANDLE_OFFSET).toInt(), (midY + dy * EDGE_HANDLE_OFFSET).toInt())
+    }
+
     fun mmousePressed(e: MouseEvent) {
         val hitThreshold = HANDLE_SIZE * 2
+        lastPressWasHandle = false
 
         for (i in corners.indices) {
             if (e.point.distance(corners[i]) < hitThreshold) {
                 draggedCornerIndex = i
                 lastMousePos = e.point
+                lastPressWasHandle = true
                 return
             }
         }
@@ -82,7 +116,23 @@ class TransformableGrid(rectangle: Rectangle2D) {
         if (e.point.distance(centerPoint) < hitThreshold) {
             draggedCornerIndex = CENTER_HANDLE_INDEX
             lastMousePos = e.point
+            lastPressWasHandle = true
             return
+        }
+
+        val axisHandles = listOf(
+            X_LEFT_HANDLE_INDEX to getLeftXScaleHandlePoint(),
+            X_RIGHT_HANDLE_INDEX to getRightXScaleHandlePoint(),
+            Y_TOP_HANDLE_INDEX to getTopYScaleHandlePoint(),
+            Y_BOTTOM_HANDLE_INDEX to getBottomYScaleHandlePoint()
+        )
+        for ((handleIndex, handlePoint) in axisHandles) {
+            if (e.point.distance(handlePoint) < hitThreshold) {
+                draggedCornerIndex = handleIndex
+                lastMousePos = e.point
+                lastPressWasHandle = true
+                return
+            }
         }
 
         for (i in 0 until 4) {
@@ -91,6 +141,7 @@ class TransformableGrid(rectangle: Rectangle2D) {
                 draggedCornerIndex = RESIZE_HANDLE_START + i
                 lastMousePos = e.point
                 initialCorners = Array(4) { Point(corners[it]) }
+                lastPressWasHandle = true
                 return
             }
         }
@@ -114,6 +165,37 @@ class TransformableGrid(rectangle: Rectangle2D) {
 
             for (corner in corners) {
                 corner.translate(dx, dy)
+            }
+        } else if (draggedCornerIndex in X_LEFT_HANDLE_INDEX..Y_BOTTOM_HANDLE_INDEX) {
+            // Edge handles move exactly the two vertices on their own edge.
+            // The opposite edge and the other coordinate of those vertices are untouched.
+            val dx = currentMousePos.x - previousMousePos.x
+            val dy = currentMousePos.y - previousMousePos.y
+            when (draggedCornerIndex) {
+                X_LEFT_HANDLE_INDEX -> {
+                    val maxDx = minOf(corners[1].x - 16 - corners[0].x, corners[2].x - 16 - corners[3].x)
+                    val safeDx = dx.coerceAtMost(maxDx)
+                    corners[0].x += safeDx
+                    corners[3].x += safeDx
+                }
+                X_RIGHT_HANDLE_INDEX -> {
+                    val minDx = maxOf(corners[0].x + 16 - corners[1].x, corners[3].x + 16 - corners[2].x)
+                    val safeDx = dx.coerceAtLeast(minDx)
+                    corners[1].x += safeDx
+                    corners[2].x += safeDx
+                }
+                Y_TOP_HANDLE_INDEX -> {
+                    val maxDy = minOf(corners[3].y - 16 - corners[0].y, corners[2].y - 16 - corners[1].y)
+                    val safeDy = dy.coerceAtMost(maxDy)
+                    corners[0].y += safeDy
+                    corners[1].y += safeDy
+                }
+                Y_BOTTOM_HANDLE_INDEX -> {
+                    val minDy = maxOf(corners[0].y + 16 - corners[3].y, corners[1].y + 16 - corners[2].y)
+                    val safeDy = dy.coerceAtLeast(minDy)
+                    corners[3].y += safeDy
+                    corners[2].y += safeDy
+                }
             }
         } else if (draggedCornerIndex in RESIZE_HANDLE_START until RESIZE_HANDLE_START + 4) {
             val cornerIdx = draggedCornerIndex - RESIZE_HANDLE_START
@@ -178,7 +260,14 @@ class TransformableGrid(rectangle: Rectangle2D) {
         )
     }
 
-    fun paint(g: Graphics, current: PalletedImage, shouldDrawImage: Boolean) {
+    fun paint(
+        g: Graphics,
+        current: PalletedImage,
+        shouldDrawImage: Boolean,
+        redOutlineOnly: Boolean = false,
+        isPixelEnabled: (Vector2i) -> Boolean = { true },
+        selectedPixel: Vector2i? = null
+    ) {
         recalculatePoints()
         val g2d = g as Graphics2D
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
@@ -190,9 +279,20 @@ class TransformableGrid(rectangle: Rectangle2D) {
                 if (paletteKey.alpha < 128) continue
                 val color = Color(paletteKey.color, true)
                 for (pos in positions) {
-                    fillCell(g2d, homography, pos.x, pos.y, color)
+                    val enabled = isPixelEnabled(pos)
+                    val cellColor = if (enabled) color else Color(125, 125, 125, 95)
+                    drawCell(g2d, homography, pos.x, pos.y, cellColor, redOutlineOnly && enabled)
                 }
             }
+        }
+
+        if (selectedPixel != null && selectedPixel.x in 0 until grid_dimensions.x && selectedPixel.y in 0 until grid_dimensions.y) {
+            val selectedPath = cellPath(homography, selectedPixel.x, selectedPixel.y)
+            val oldStroke = g2d.stroke
+            g2d.color = Color(40, 220, 255, 230)
+            g2d.stroke = BasicStroke(3.0f)
+            g2d.draw(selectedPath)
+            g2d.stroke = oldStroke
         }
 
         if (showGridLines) {
@@ -247,6 +347,31 @@ class TransformableGrid(rectangle: Rectangle2D) {
             g2d.drawRect(resizeP.x - rSize / 2, resizeP.y - rSize / 2, rSize, rSize)
         }
 
+        // Four orange side handles: left/right adjust only their edge's X coordinates;
+        // top/bottom adjust only their edge's Y coordinates.
+        val axisHandleSize = HANDLE_SIZE + 6
+        g2d.font = g2d.font.deriveFont(Font.BOLD, 11f)
+        fun drawAxisHandle(edgeStart: Point, edgeEnd: Point, handle: Point, label: String) {
+            val edgeMid = Point((edgeStart.x + edgeEnd.x) / 2, (edgeStart.y + edgeEnd.y) / 2)
+            g2d.color = Color(255, 170, 0, 190)
+            g2d.drawLine(edgeMid.x, edgeMid.y, handle.x, handle.y)
+            g2d.color = Color(255, 145, 0)
+            g2d.fillRoundRect(
+                handle.x - axisHandleSize / 2, handle.y - axisHandleSize / 2,
+                axisHandleSize, axisHandleSize, 4, 4
+            )
+            g2d.color = Color.WHITE
+            g2d.drawRoundRect(
+                handle.x - axisHandleSize / 2, handle.y - axisHandleSize / 2,
+                axisHandleSize, axisHandleSize, 4, 4
+            )
+            g2d.drawString(label, handle.x - 4, handle.y + 4)
+        }
+        drawAxisHandle(corners[0], corners[3], getLeftXScaleHandlePoint(), "X")
+        drawAxisHandle(corners[1], corners[2], getRightXScaleHandlePoint(), "X")
+        drawAxisHandle(corners[0], corners[1], getTopYScaleHandlePoint(), "Y")
+        drawAxisHandle(corners[3], corners[2], getBottomYScaleHandlePoint(), "Y")
+
         val centerHandleSize = HANDLE_SIZE + 4
         g2d.color = Color(0, 220, 110)
         g2d.fillOval(center.x - centerHandleSize / 2, center.y - centerHandleSize / 2, centerHandleSize, centerHandleSize)
@@ -254,7 +379,31 @@ class TransformableGrid(rectangle: Rectangle2D) {
         g2d.drawOval(center.x - centerHandleSize / 2, center.y - centerHandleSize / 2, centerHandleSize, centerHandleSize)
     }
 
-    private fun fillCell(g2d: Graphics2D, h: Matrix3f, col: Int, row: Int, color: Color) {
+    private fun drawCell(
+        g2d: Graphics2D,
+        h: Matrix3f,
+        col: Int,
+        row: Int,
+        color: Color,
+        redOutlineOnly: Boolean
+    ) {
+        val path = cellPath(h, col, row)
+        if (redOutlineOnly) {
+            // BasicStroke is centered on the cell boundary. Intersecting it with the cell
+            // leaves a 2-screen-pixel outline entirely inside the cell.
+            val innerOutline = Area(BasicStroke(4.0f).createStrokedShape(path))
+            innerOutline.intersect(Area(path))
+            g2d.color = Color.RED
+            g2d.fill(innerOutline)
+        } else {
+            g2d.color = color
+            if (cells) g2d.fill(path)
+            g2d.color = Color(255, 0, 0, 255)
+            g2d.draw(path)
+        }
+    }
+
+    private fun cellPath(h: Matrix3f, col: Int, row: Int): Path2D.Float {
         val denomX = if (grid_dimensions.x > 1) (grid_dimensions.x - 1).toFloat() else 1.0f
         val denomY = if (grid_dimensions.y > 1) (grid_dimensions.y - 1).toFloat() else 1.0f
 
@@ -275,21 +424,10 @@ class TransformableGrid(rectangle: Rectangle2D) {
             val p = Vector3f(coords[i][0], coords[i][1], 1.0f).mul(h)
             val px = if (p.z != 0f) p.x / p.z else p.x
             val py = if (p.z != 0f) p.y / p.z else p.y
-            if (i == 0) {
-                path.moveTo(px, py)
-            } else {
-                path.lineTo(px, py)
-            }
+            if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
         }
         path.closePath()
-
-        g2d.color = color
-        if (cells) {
-            g2d.fill(path)
-        }
-
-        g2d.color = Color(255, 0, 0, 255)
-        g2d.draw(path)
+        return path
     }
 
     private fun drawGrid(g2d: Graphics2D, h: Matrix3f) {
@@ -368,7 +506,21 @@ class TransformableGrid(rectangle: Rectangle2D) {
         }
 
         override fun mouseReleased(e: MouseEvent?) {
+            val wasDraggingHandle = draggedCornerIndex != -1
             e?.let { mmouseReleased(it) }
+            if (wasDraggingHandle) onTransformChanged?.invoke()
+        }
+
+        override fun mouseClicked(e: MouseEvent?) {
+            val event = e ?: return
+            if (lastPressWasHandle) return
+            val nearest = cached.entries.minByOrNull { (_, projected) ->
+                val dx = projected.x - event.x
+                val dy = projected.y - event.y
+                dx * dx + dy * dy
+            }?.key ?: return
+            onCellClicked?.invoke(Vector2i(nearest))
+            overlay.frame.repaint()
         }
 
         override fun mouseDragged(e: MouseEvent?) {

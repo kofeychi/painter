@@ -1,0 +1,27 @@
+{
+  "pickerX": 99,
+  "pickerY": 696,
+  "files": {
+    "C:\\Users\\11\\Documents\\GitHub\\painter\\run\\deddtgfghjkl_26x51x28 (1).json": {
+      "currentLayerIndex": 50,
+      "quantizeColors": 16,
+      "chunkWidth": 51,
+      "chunkHeight": 51,
+      "redOutlineOnly": true,
+      "gridCornerX": [
+        558,
+        1192,
+        1192,
+        558
+      ],
+      "gridCornerY": [
+        107,
+        107,
+        790,
+        790
+      ],
+      "layerPaintEnabled": {},
+      "pixelPaintEnabled": {}
+    }
+  }
+}

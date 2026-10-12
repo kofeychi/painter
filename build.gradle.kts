@@ -18,7 +18,7 @@ application {
 dependencies {
     implementation("it.unimi.dsi:fastutil:8.5.12")
     implementation("com.google.code.gson:gson:2.8.9")
-
+    implementation("net.java.dev.jna:jna:5.19.1")
     implementation("org.joml:joml:1.10.8")
     implementation("com.github.kwhat:jnativehook:+")
 }
